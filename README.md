@@ -28,3 +28,7 @@ syntax:
 	 -p x,y  --position=x,y          Initial screen position (default: 100, 100)
 
 ```
+
+## ToDo
+
+* FixMe: On multiple monitors where the secondary monitor is smaller, the window does not show up.

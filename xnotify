@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 
 import Xlib.display
 import Xlib.protocol
@@ -48,7 +48,7 @@ def run(
 
     for line in text.split("\n"):
         if len(line) != 0:
-            data = gc.query_text_extents(line)
+            data = gc.query_text_extents(bytes(line, 'utf-8'))
             text_width = max(data._data['overall_width'], text_width)
             text_height = max(data._data['font_ascent'], text_height)
         text_lines += 1
@@ -70,7 +70,7 @@ def run(
 
     dimentions = [geo.width, geo.height]
     new_position = []
-    for dim in xrange(len(dimentions)):
+    for dim in range(len(dimentions)):
         pos = position[dim]
         if position[dim] < 0:
             pos = dimentions[dim] - workarea[dim] + position[dim] - 1
@@ -88,7 +88,7 @@ def run(
         win.destroy()
 
     signal.signal(signal.SIGALRM, on_timeout)
-    signal.alarm(timeout)
+    signal.alarm(int(timeout))
 
     def draw(invert = 0):
         gcs = (gc, gc_background)
@@ -100,7 +100,7 @@ def run(
 
         ypos = 0
         for line in text.split("\n"):
-            win.draw_text(gcs[0], border, text_height+border + ypos, line)
+            win.draw_text(gcs[0], border, text_height+border + ypos, bytes(line, 'utf-8'))
             ypos += text_height
 
     while 1:
@@ -141,8 +141,7 @@ def run(
             break
 
 def usage():
-    print \
-"""
+    print("""
 syntax:
   xnotify [-hxtpfeidep] message
 
@@ -161,7 +160,7 @@ syntax:
      -e secs, --blink-rate=secs      Rate of the blink (time between each color flip)
 
      -p x,y  --position=x,y          Initial screen position (default: 100, 100)
-"""
+""")
 
 def main(args):
     import getopt
@@ -207,8 +206,8 @@ def main(args):
             parts = value.split(",")
             if len(parts) == 2:
                 x, y = parts
-                x = float(x)
-                y = float(y)
+                x = int(x)
+                y = int(y)
                 param_dict['position'] = (x, y)
 
     if not from_file:

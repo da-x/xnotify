@@ -6,9 +6,23 @@ import Xlib.X as X
 
 import time
 import signal
+import select
+
+def x_wait_for_event(xdisplay, timeout_seconds):
+    # https://gist.github.com/fphammerle/d81ca3ff0a169f062a9f28e57b18f04d
+    """ Wait up to `timeout_seconds` seconds for an event to be queued.
+        Return True, if a xevent is available.
+        Return False, if the timeout was reached. """
+    rlist = select.select(
+        [xdisplay.display.socket], # rlist
+        [], # wlist
+        [], # xlist
+        timeout_seconds, # timeout [seconds]
+    )[0]
+    return len(rlist) > 0
 
 def run(
-    timeout = 5,
+    timeout = 5.0,
     background_color = 'black',
     foreground_color = 'white',
     border_color = 'red',
@@ -103,8 +117,14 @@ def run(
             win.draw_text(gcs[0], border, text_height+border + ypos, bytes(line, 'utf-8'))
             ypos += text_height
 
-    while 1:
-        if do_blink:
+    t = time.time()
+    end_t = t + timeout
+    while time.time() < end_t:
+        while not disp.pending_events() and \
+                not x_wait_for_event(disp, 0.1):
+            if not do_blink:
+                continue
+
             last_time = time.time()
             while not disp.pending_events() and last_time < blink_time:
                 current_time = time.time()

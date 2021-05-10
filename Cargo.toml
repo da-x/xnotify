@@ -1,0 +1,16 @@
+[package]
+name = "xnotify"
+version = "0.1.0"
+authors = ["Dan Aloni <alonid@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+structopt = "0.3"
+thiserror = "1"
+cairo-sys-rs = { version = "0.10", features = ["xcb"] }
+cairo-rs = { version = "0.9", features = ["xcb"] }
+xcb = { version = "0.9", features = ["randr"] }
+pangocairo = "0.10"
+pango = "0.9"
+error-chain = "0.11.0"
+image = "0.18.0"

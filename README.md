@@ -5,10 +5,20 @@ An Xorg-based program that shows an on-screen notification window with a simple 
 Similar to [osd_cat](http://manpages.ubuntu.com/manpages/lucid/man1/osd_cat.1.html), but with
 some different features.
 
-Written in Python.
+Originally in Python (2003), rewritten in Rust (2021).
+
+Some code based on Chris Duerr's [leechbar](https://github.com/chrisduerr/leechbar).
+
+
+### Invocation example
 
 ```
-syntax:
+echo -n "I'm a tomato: 🍅" | cargo run --release -- -n "normal 30" -l
+```
+
+### Syntax
+
+```
   xnotify [-hxtpfeidep] message
 
 	 -h, --help                      This help screen.
@@ -26,9 +36,4 @@ syntax:
 	 -e secs, --blink-rate=secs      Rate of the blink (time between each color flip)
 
 	 -p x,y  --position=x,y          Initial screen position (default: 100, 100)
-
 ```
-
-## ToDo
-
-* FixMe: On multiple monitors where the secondary monitor is smaller, the window does not show up.

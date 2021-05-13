@@ -14,28 +14,16 @@ mod leechbar;
 #[derive(StructOpt, Debug)]
 struct Opt {
     /// Time to wait until message automatically gets off the screen
-    #[structopt(long = "timeout", short="t", default_value="5")]
-    timeout: f32,
+    #[structopt(long = "timeout", short="t")]
+    timeout: Option<f32>,
 
     /// Take text from file instead of standard input. If file is '-', takes from standard input.
-    #[structopt(long = "fromfile", short="x")]
+    #[structopt(long = "from-file", short="x")]
     from_file: Option<PathBuf>,
 
-    /// Color of the text's background
-    #[structopt(long = "background", short="b", default_value="black")]
-    background: String,
-
-    /// Color of the text's foreground
-    #[structopt(long = "foreground", short="f", default_value="white")]
-    foreground: String,
-
-    /// Font
+    /// Font to use (Pango font string, for example "normal 100" for big text)
     #[structopt(long = "font", short="n", default_value="9x15bold")]
     font: String,
-
-    /// Color of the border
-    #[structopt(long = "border", short="r", default_value="red")]
-    border_color: String,
 
     /// Make the window flash its colors
     #[structopt(long = "blink", short="l")]
@@ -50,7 +38,7 @@ struct Opt {
     blink_rate: f32,
 
     /// Initial screen position
-    #[structopt(long = "position", short="p", default_value="100,100")]
+    #[structopt(long = "position", short="p", default_value="%50,%50")]
     position: String,
 }
 
@@ -58,10 +46,14 @@ struct Opt {
 enum Error {
     #[error("Io error; {0}")]
     IoError(#[from] std::io::Error),
+    #[error("ParseInt error: {0}")]
+    ParseIntError(#[from] std::num::ParseIntError),
     #[error("Xcb error; {0}")]
     XcbError(#[from] xcb::Error<xcb::ffi::xcb_generic_error_t>),
     #[error("No screen found")]
     NoScreenFound,
+    #[error("Invalid position specified")]
+    InvalidPosition,
 }
 
 fn main() {
@@ -111,21 +103,65 @@ fn create_gc_32(conn: &Connection, window: u32) -> Result<u32, Error> {
     // First create a dummy pixmap with 32 bit depth
     let pix32 = conn.generate_id();
     xcb::create_pixmap_checked(&conn, 32, pix32, window, 1, 1)
-        .request_check()
-        .expect("Unable to create GC dummy pixmap");
+        .request_check()?;
 
     // Then create a gc from that pixmap
     let gc = conn.generate_id();
     xcb::create_gc_checked(&conn, gc, pix32, &[])
-        .request_check()
-        .expect("Unable to create GC");
+        .request_check()?;
 
     // Free pixmap after creating the gc
     xcb::free_pixmap_checked(&conn, pix32)
-        .request_check()
-        .expect("Unable to free GC dummy pixmap");
+        .request_check()?;
 
     Ok(gc)
+}
+
+fn draw(blink_state: bool, conn: &Connection, win: u32,
+    frame: u32, black: u32, window_pict: u32,
+    border_size: u16, border_pad: u16, total_width: u16, total_height: u16,
+    text: &leechbar::component::text::Text) -> Result<(), Error>
+{
+    xcb::poly_fill_rectangle(&conn, win, if blink_state { frame } else { black },
+        &[xcb::Rectangle::new(
+            0, 0,
+            total_width + (border_pad * 2 + border_size),
+            total_height + (border_pad * 2 + border_size))
+        ]);
+
+    xcb::poly_rectangle(&conn, win, frame,
+        &[xcb::Rectangle::new(
+            0, 0,
+            total_width + (border_pad * 2 + border_size),
+            total_height + (border_pad * 2 + border_size))
+        ]);
+
+    let op = xcb::render::PICT_OP_OVER as u8;
+    let pw = text.arc.geometry.width;
+    let ph = text.arc.geometry.height;
+
+    xcb::render::composite_checked(
+        &conn, op, text.arc.xid, 0, window_pict,
+        0, 0, 0, 0,
+        (border_pad + border_size) as i16, (border_pad + border_size) as i16, pw, ph
+    ).request_check()?;
+
+    conn.flush();
+
+    Ok(())
+}
+
+fn parse_position(v: &str, measure: u16, screen_measure: u16) -> Result<i16, Error>
+{
+    let pos = if v.starts_with("%") {
+        let percent : u64 = v[1..].parse()?;
+        ((screen_measure as u64 * percent) / 100) as u16
+    } else {
+        v[..].parse()?
+    };
+    let pos = pos as i16 - measure as i16 / 2;
+    let min = screen_measure.saturating_sub(measure) as i16;
+    Ok(std::cmp::max(0, std::cmp::min(min, pos)))
 }
 
 fn main_wrap() -> Result<(), Error> {
@@ -151,7 +187,7 @@ fn main_wrap() -> Result<(), Error> {
     };
 
     let (format24, format32) = leechbar::util::formats::image_formats(&conn);
-    let (total_width, total_height) =
+    let (text_width, text_height) =
         leechbar::component::text::text_size(&text, &pango_font).unwrap();
     let border_size = 1;
     let border_pad = 10;
@@ -172,16 +208,26 @@ fn main_wrap() -> Result<(), Error> {
     ]).request_check()?;
 
     let largest_window = get_largest_window(&conn, &screen)?;
+    let total_width = text_width + (border_pad + border_size) * 2;
+    let total_height = text_height + (border_pad + border_size) * 2;
 
     // Create the window
     let win = conn.generate_id();
+    let (mut pos_x, mut pos_y) = if let Some((pos_x, pos_y)) = opt.position.split_once(",") {
+        let x = parse_position(pos_x, total_width, largest_window.1.0)?;
+        let y = parse_position(pos_y, total_height, largest_window.1.1)?;
+        ((largest_window.0.0 + x) as i16, (largest_window.0.1 + y) as i16)
+    } else {
+        return Err(Error::InvalidPosition);
+    };
+
     xcb::create_window(&conn,
         xcb::WINDOW_CLASS_COPY_FROM_PARENT as u8,
         win,
         screen.root(),
-        largest_window.0.0 + (largest_window.1.0 / 2) as i16,
-        largest_window.0.1 + (largest_window.1.1 / 2) as i16,
-        total_width + (border_pad + border_size) * 2, total_height + (border_pad + border_size) * 2,
+        pos_x,
+        pos_y,
+        total_width, total_height,
         0,
         xcb::WINDOW_CLASS_INPUT_OUTPUT as u16,
         screen.root_visual(), &[
@@ -190,16 +236,16 @@ fn main_wrap() -> Result<(), Error> {
             (xcb::CW_EVENT_MASK,
              xcb::EVENT_MASK_EXPOSURE |
              xcb::EVENT_MASK_STRUCTURE_NOTIFY |
+             xcb::EVENT_MASK_POINTER_MOTION |
              xcb::EVENT_MASK_BUTTON_PRESS |
-             xcb::EVENT_MASK_BUTTON_RELEASE |
-             xcb::EVENT_MASK_KEY_PRESS),
+             xcb::EVENT_MASK_BUTTON_RELEASE),
         ]
     ).request_check()?;
 
     conn.flush();
 
     let gcontext = create_gc_32(&conn, win)?;
-    let geometry = leechbar::util::Geometry::new(0, 0, total_width, total_height);
+    let geometry = leechbar::util::Geometry::new(0, 0, text_width, text_height);
     let color = leechbar::util::Color::new(255, 255, 255, 255);
     let text = leechbar::component::text::Text::new(
         conn.clone(), geometry, gcontext, win, format32, &text, &pango_font, color,
@@ -220,42 +266,17 @@ fn main_wrap() -> Result<(), Error> {
     let start_time = std::time::Instant::now();
     let mut blink_state = false;
 
-    fn draw(blink_state: bool, conn: &Connection, win: u32,
-        frame: u32, black: u32, window_pict: u32,
-        border_size: u16, border_pad: u16, total_width: u16, total_height: u16,
-        text: &leechbar::component::text::Text) -> Result<(), Error>
-    {
-        xcb::poly_fill_rectangle(&conn, win, if blink_state { frame } else { black },
-            &[xcb::Rectangle::new(
-                0, 0,
-                total_width + (border_pad * 2 + border_size),
-                total_height + (border_pad * 2 + border_size))
-            ]);
+    let mut dur = match opt.timeout {
+        Some(t) => Some(Duration::from_millis((1000.0 * t) as u64)),
+        None => None,
+    };
+    let mut grab_pointer_coords = None;
+    let mut pending_configure = false;
 
-        xcb::poly_rectangle(&conn, win, frame,
-            &[xcb::Rectangle::new(
-                0, 0,
-                total_width + (border_pad * 2 + border_size),
-                total_height + (border_pad * 2 + border_size))
-            ]);
-
-        let op = xcb::render::PICT_OP_OVER as u8;
-        let pw = text.arc.geometry.width;
-        let ph = text.arc.geometry.height;
-
-        xcb::render::composite_checked(
-            &conn, op, text.arc.xid, 0, window_pict,
-            0, 0, 0, 0,
-            (border_pad + border_size) as i16, (border_pad + border_size) as i16, pw, ph
-        ).request_check()?;
-
-        conn.flush();
-
-        Ok(())
-    }
-
-    let dur = Duration::from_millis((1000.0 * opt.timeout) as u64);
-    while start_time.elapsed() < dur {
+    while match dur {
+        Some(dur) => start_time.elapsed() < dur,
+        None => true
+    } {
         std::thread::sleep(Duration::from_millis(1));
 
         if opt.blink {
@@ -270,11 +291,11 @@ fn main_wrap() -> Result<(), Error> {
             if new_blink_state != blink_state {
                 blink_state = new_blink_state;
                 draw(blink_state, &conn, win, frame, black, window_pict, border_size, border_pad,
-                    total_width, total_height, &text)?;
+                    text_width, text_height, &text)?;
             }
         }
 
-        let event = if let Some(event) = conn.poll_for_queued_event() {
+        let event = if let Some(event) = conn.poll_for_event() {
             event
         } else {
             continue;
@@ -282,11 +303,55 @@ fn main_wrap() -> Result<(), Error> {
 
         let r = event.response_type() & !0x80;
         match r {
-            xcb::EXPOSE => {
+            xcb::CONFIGURE_NOTIFY => {
+                pending_configure = false;
                 draw(blink_state, &conn, win, frame, black, window_pict, border_size, border_pad,
-                    total_width, total_height, &text)?;
+                    text_width, text_height, &text)?;
             },
-            xcb::KEY_PRESS => {},
+            xcb::MOTION_NOTIFY => {
+                let event: &xcb::MotionNotifyEvent = unsafe { xcb::cast_event(&event) };
+
+                if !pending_configure {
+                    if let Some((px, py)) = grab_pointer_coords {
+                        let (x, y) = (event.event_x(), event.event_y());
+
+                        if x != px || y != py {
+                            pos_x = event.root_x() - px;
+                            pos_y = event.root_y() - py;
+
+                            xcb::configure_window(&conn, win, &[
+                                (xcb::CONFIG_WINDOW_X as u16, pos_x as u32),
+                                (xcb::CONFIG_WINDOW_Y as u16, pos_y as u32),
+                            ]).request_check()?;
+
+                            pending_configure = true;
+                        }
+                    }
+                }
+            },
+            xcb::BUTTON_PRESS => {
+                let event: &xcb::ButtonPressEvent = unsafe { xcb::cast_event(&event) };
+                let button = event.detail() as u32;
+                if button == xcb::BUTTON_INDEX_3 {
+                    break;
+                } else if button == xcb::BUTTON_INDEX_1 {
+                    let event_mask = xcb::EVENT_MASK_POINTER_MOTION
+                        | xcb::EVENT_MASK_BUTTON_RELEASE;
+                    grab_pointer_coords = Some((event.event_x(), event.event_y()));
+                    xcb::grab_pointer(&conn, true, screen.root(), event_mask as u16,
+                        xcb::GRAB_MODE_ASYNC as u8, xcb::GRAB_MODE_ASYNC as u8, 0, 0,
+                        xcb::CURRENT_TIME);
+                    dur = None;
+                }
+            },
+            xcb::BUTTON_RELEASE => {
+                let event: &xcb::ButtonReleaseEvent = unsafe { xcb::cast_event(&event) };
+                let button = event.detail() as u32;
+                if button == xcb::BUTTON_INDEX_1 {
+                    xcb::ungrab_pointer(&conn, xcb::CURRENT_TIME);
+                    grab_pointer_coords = None;
+                }
+            },
             xcb::DESTROY_NOTIFY => {
                 break;
             },

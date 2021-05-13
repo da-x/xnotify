@@ -38,7 +38,6 @@ FLAGS:
 OPTIONS:
     -d, --blink-duration <blink-duration>    Duration of the blink [default: 0.25]
     -e, --blink-rate <blink-rate>            Rate of the blink (time between each color flip) [default: 0.05]
-    -r, --border <border-color>              Color of the border [default: red]
     -n, --font <font>                        Font to use (Pango font string, for example "normal 100" for big text)
     -x, --from-file <from-file>              Take text from file instead of standard input. If file is '-', takes from
                                              standard input

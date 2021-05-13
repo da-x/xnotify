@@ -12,9 +12,15 @@ Some code based on Chris Duerr's [leechbar](https://github.com/chrisduerr/leechb
 
 ### Invocation example
 
+Appear in the bottom-right corner of the screen, flash for 5 seconds and disappear:
+
 ```
-echo -n "I'm a tomato: 🍅" | cargo run --release -- -n "normal 30" -l
+echo -n "I'm a tomato: 🍅" | xnotify -n "normal 30" -l -t 5 -p '%100,%100'
 ```
+
+- If right click happens, disappears sooner.
+- If dragged - cancels timeout.
+
 
 ### Syntax
 

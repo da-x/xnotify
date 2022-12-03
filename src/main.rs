@@ -46,14 +46,21 @@ struct Opt {
 enum Error {
     #[error("Io error; {0}")]
     IoError(#[from] std::io::Error),
+
     #[error("ParseInt error: {0}")]
     ParseIntError(#[from] std::num::ParseIntError),
+
     #[error("Xcb error; {0}")]
     XcbError(#[from] xcb::Error<xcb::ffi::xcb_generic_error_t>),
+
     #[error("No screen found")]
     NoScreenFound,
+
     #[error("Invalid position specified")]
     InvalidPosition,
+
+    #[error("No X connection")]
+    NoConnection,
 }
 
 fn main() {
@@ -167,7 +174,12 @@ fn parse_position(v: &str, measure: u16, screen_measure: u16) -> Result<i16, Err
 fn main_wrap() -> Result<(), Error> {
     let opt = Opt::from_args();
 
-    let (conn, screen_num) = xcb::Connection::connect(None).unwrap();
+    let (conn, screen_num) = if let Ok(x) = xcb::Connection::connect(None) {
+        x
+    } else {
+        return Err(Error::NoConnection);
+    };
+
     let conn = Arc::new(conn);
     let setup = conn.get_setup();
     let screen = setup.roots().nth(screen_num as usize).unwrap();

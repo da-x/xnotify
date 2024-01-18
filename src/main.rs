@@ -305,6 +305,9 @@ fn main_wrap() -> Result<(), Error> {
                 draw(blink_state, &conn, win, frame, black, window_pict, border_size, border_pad,
                     text_width, text_height, &text)?;
             }
+        } else {
+            draw(blink_state, &conn, win, frame, black, window_pict, border_size, border_pad,
+                text_width, text_height, &text)?;
         }
 
         let event = if let Some(event) = conn.poll_for_event() {
